@@ -95,7 +95,8 @@ size_t conv_mem_to_real_offset(unsigned char *mem, int sz)
 {
     size_t ret = 0;
     if (sz > sizeof(size_t)) return -1; //too big
-    unsigned char tmp[sizeof(size_t)];
+    static unsigned char tmp[sizeof(size_t)];
+    memset(tmp, 0, sizeof(tmp));
     memcpy(tmp, mem, sz);
     ret = *(size_t*)tmp;
     return ret;
@@ -115,6 +116,17 @@ int print_real_offset(unsigned char *mem, int sz)
 }
 
 
+size_t file_get_sz(FILE *fd)
+{
+    long ret = 0;
+    long old = ftell(fd);
+    fseek(fd, 0L, SEEK_END);
+    ret = ftell(fd);
+    fseek(fd, old, SEEK_SET);
+    return ret;
+}
+
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -123,25 +135,37 @@ int main(int argc, char **argv)
     }
     
     FILE *fd = fopen(argv[1], "rb");
-    unsigned char buf[1024 * 120] = {};
-
-    fread(buf, 1, sizeof(buf), fd);
-
-    for (int i = 0; i < sizeof(buf); i++) {
-        //printf(" 0x%hx", buf[i]); //Hexdump program data
+    if (!fd) {
+        printf("Cannot open target file.\n");
+        return -1;
     }
 
-    unsigned char tmp[128] = {};
+    size_t fsize = file_get_sz(fd);
+    unsigned char *buf = (unsigned char*)malloc(fsize);
+    fread(buf, 1, fsize, fd);
+    fclose(fd);
     
-    unsigned int constant_sig = 0x4d5a;
-    memcpy(tmp, &constant_sig, 2);
+    unsigned char tmp[8] = {};
+    
+    unsigned int MZ_sig = 0x4d5a; //Constant MZ signature
+    memcpy(tmp, &MZ_sig, 2);
     encode(tmp, 2);
-    printf("Constant signature at: %d\n", hex_search(tmp, 2, buf, sizeof(buf)));
+
+    int MZ_sig_pos = hex_search(tmp, 2, buf, fsize);
+    if (MZ_sig_pos < 0) {
+        printf("Invalid file type.\n");
+        free(buf);
+        return -1;
+    }
 
     unsigned int PE_sig = 0x00004550; //WinPE signature
-    memcpy(tmp, &PE_sig, 4); //Size of WinPE Signature is 4
+    memcpy(tmp, &PE_sig, PE_SIG_SZ); //Size of WinPE Signature is 4
 
-    int PE_SIG_OFF = hex_search(tmp, 4, buf, sizeof(buf));
+    int PE_SIG_OFF = hex_search(tmp, PE_SIG_SZ, buf, fsize);
+    if (PE_SIG_OFF < 0) {
+        printf("File is not WinPE type.\n");
+        return -1;
+    }
     printf("PE signature at: 0x%hx\n", PE_SIG_OFF);
 
     printf("\n=COFF headers=\n");
@@ -160,5 +184,8 @@ int main(int argc, char **argv)
     printf("Base of .data section: "); print_real_offset(buf + BASE_OF_DATA_OFF, BASE_OF_DATA_SZ);
 
     //TODO: Add the rest
+
+    free(buf);
     return 0;
+
 }
