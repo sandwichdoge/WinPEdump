@@ -91,31 +91,30 @@ void encode(unsigned char *mem, int sz)
 }
 
 
-size_t conv_mem_to_real_offset(unsigned char *mem, int sz)
+size_t read_mem_at(unsigned char *mem, int sz)
 {
     size_t ret = 0;
     if (sz > sizeof(size_t)) return -1; //too big
-    static unsigned char tmp[sizeof(size_t)];
-    memset(tmp, 0, sizeof(tmp));
-    memcpy(tmp, mem, sz);
-    ret = *(size_t*)tmp;
+    ret = *(size_t*)mem;
     return ret;
 }
 
 
+//Print value at mem address
 int print_real_offset(unsigned char *mem, int sz)
 {
     if (sz > sizeof(size_t)) {
         printf("Invalid mem size.\n");
         return -1; //too big
     }
-    size_t real_offset = conv_mem_to_real_offset(mem, sz);
+    size_t real_offset = read_mem_at(mem, sz);
     printf("0x%hx\n", real_offset);
 
     return 0;
 }
 
 
+//Get size of already open file
 size_t file_get_sz(FILE *fd)
 {
     long ret = 0;
