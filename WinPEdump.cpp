@@ -42,10 +42,17 @@ int hex_search(unsigned char *val, int sz, unsigned char *buf, int bufsz)
 }
 
 
-void print_mem(unsigned char *mem, int sz)
+//Dump memory
+//Format: type=0->ascii, type=1->hex
+void print_mem(unsigned char *mem, int sz, int type = 1)
 {
     for (int i = 0; i < sz; i++) {
-        printf("%02x ", mem[i]);
+        if (type == 1) {
+            printf("%02x ", mem[i]);
+        }
+        else {
+            printf("%c ", mem[i]);
+        }
         if (i >= 16 && i % 16 == 0) {
             printf("\n");
         }
@@ -94,14 +101,14 @@ void encode(unsigned char *mem, int sz)
 size_t read_mem_at(unsigned char *mem, int sz)
 {
     size_t ret = 0;
-    if (sz > sizeof(size_t)) return -1; //too big
+    if (sz > sizeof(size_t)) return 0; //too big
     ret = *(size_t*)mem;
     return ret;
 }
 
 
 //Print value at mem address
-int print_real_offset(unsigned char *mem, int sz)
+int print_number_at(unsigned char *mem, int sz)
 {
     if (sz > sizeof(size_t)) {
         printf("Invalid mem size.\n");
@@ -129,7 +136,7 @@ size_t file_get_sz(FILE *fd)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: %s <program_name.exe>\n", argv[0]);
+        printf("Usage: %s <program_name.exe> [-d]\n", argv[0]);
         return -1;
     }
     
@@ -168,19 +175,25 @@ int main(int argc, char **argv)
     printf("PE signature at: 0x%hx\n", PE_SIG_OFF);
 
     printf("\n=COFF headers=\n");
-    printf("Machine signature: "); print_real_offset(buf + MACHINE_OFF, MACHINE_SZ);
-    printf("Number of sections: "); print_real_offset(buf + NUMBER_OF_SECTIONS_OFF, NUMBER_OF_SECTIONS_SZ);
-    printf("Datetime stamp: "); print_real_offset(buf + DATETIME_OFF, DATETIME_SZ);
-    printf("Optional headers size: "); print_real_offset(buf + OPTIONAL_HEADERS_SIZE_OFF, OPTIONAL_HEADERS_SIZE_SZ);
+    printf("Machine signature: "); print_number_at(buf + MACHINE_OFF, MACHINE_SZ);
+    printf("Number of sections: "); print_number_at(buf + NUMBER_OF_SECTIONS_OFF, NUMBER_OF_SECTIONS_SZ);
+    printf("Datetime stamp: "); print_number_at(buf + DATETIME_OFF, DATETIME_SZ);
+    printf("Optional headers size: "); print_number_at(buf + OPTIONAL_HEADERS_SIZE_OFF, OPTIONAL_HEADERS_SIZE_SZ);
 
     printf("\n=Standard fields=\n");
-    printf("File type signature: "); print_real_offset(buf + FILE_TYPE_OFF, FILE_TYPE_SZ);
-    printf("Code section size: "); print_real_offset(buf + CODE_SIZE_OFF, CODE_SIZE_SZ);
-    printf("Initialized data size: "); print_real_offset(buf + INITIALIZED_DATA_OFF, INITIALIZED_DATA_SZ);
-    printf("Uninitialized data size: "); print_real_offset(buf + UNINITIALIZED_DATA_OFF, UNINITIALIZED_DATA_SZ);
-    printf("Program starts at: "); print_real_offset(buf + PROGRAM_ENTRY_POINT_OFF, PROGRAM_ENTRY_POINT_SZ); //address in mem
-    printf("Base of code section: "); print_real_offset(buf + BASE_OF_CODE_OFF, BASE_OF_CODE_SZ);
-    printf("Base of .data section: "); print_real_offset(buf + BASE_OF_DATA_OFF, BASE_OF_DATA_SZ);
+    printf("File type signature: "); print_number_at(buf + FILE_TYPE_OFF, FILE_TYPE_SZ);
+    printf("Code section size: "); print_number_at(buf + CODE_SIZE_OFF, CODE_SIZE_SZ);
+    printf("Initialized data size: "); print_number_at(buf + INITIALIZED_DATA_OFF, INITIALIZED_DATA_SZ);
+    printf("Uninitialized data size: "); print_number_at(buf + UNINITIALIZED_DATA_OFF, UNINITIALIZED_DATA_SZ);
+    printf("Program starts at: "); print_number_at(buf + PROGRAM_ENTRY_POINT_OFF, PROGRAM_ENTRY_POINT_SZ); //address in mem
+    printf("Base of code section: "); print_number_at(buf + BASE_OF_CODE_OFF, BASE_OF_CODE_SZ);
+    printf("Base of .data section: "); print_number_at(buf + BASE_OF_DATA_OFF, BASE_OF_DATA_SZ);
+
+    if (strcmp(argv[2], "-d") == 0) {
+        //Dump initialized .data section
+        size_t init_data_size = read_mem_at(buf + INITIALIZED_DATA_OFF, INITIALIZED_DATA_SZ);
+        print_mem(buf + INITIALIZED_DATA_OFF, init_data_size, 0);
+    }
 
     //TODO: Add the rest
 
