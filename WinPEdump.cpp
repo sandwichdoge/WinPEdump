@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_SHARED_LIBS 100
 //Get info of a WinPE executable.
+//TODO: use a header struct instead of keeping track of offset & size
 
 #define BASE 0x0
 #define PE_SIG_SZ 0x4
@@ -30,6 +32,19 @@
 #define BASE_OF_DATA_OFF PE_SIG_OFF + 48
 #define BASE_OF_DATA_SZ 0x4
 
+#define IMAGE_BASE_OFF PE_SIG_OFF + 52
+#define IMAGE_BASE_SZ 0x4
+#define SECTION_ALIGNMENT_OFF PE_SIG_OFF + 56
+#define SECTION_ALIGNMENT_SZ 0x4
+#define FILE_ALIGNMENT_OFF PE_SIG_OFF + 60
+#define FILE_ALIGNMENT_SZ 0x4
+
+#define SECTION_HEADER_RAW_LEN_OFF SECTION_HEADER_NAME + 16
+#define SECTION_HEADER_RAW_LEN_SZ 0x4
+#define SECTION_HEADER_RAW_LOC_OFF SECTION_HEADER_NAME + 20
+#define SECTION_HEADER_RAW_LOC_SZ 0x4
+#define SECTION_HEADER_LEN 40
+
 
 int hex_search(unsigned char *val, int sz, unsigned char *buf, int bufsz)
 {
@@ -42,17 +57,53 @@ int hex_search(unsigned char *val, int sz, unsigned char *buf, int bufsz)
 }
 
 
+unsigned char *str_find(unsigned char *buf, char *substr, int bufsz)
+{
+    int sublen = strlen(substr);
+    for (int i = 0; i < bufsz; i++) {
+        if (memcmp(buf + i, substr, sublen) == 0) {
+            return buf + i;
+        }
+    }
+
+    return NULL;
+}
+
+
+int is_ascii_symbol(unsigned char c)
+{
+    static unsigned char symbols[] = {'+', '-', '*', '/', '.', '_', '[', ']', '(', ')', '~', ' '};
+    for (int i = 0; i < sizeof(symbols); i++) {
+        if (symbols[i] == c) return 1;
+    }
+
+    return 0;
+}
+
+
+int is_ascii(unsigned char c)
+{
+    return (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || is_ascii_symbol(c));
+}
+
+
 //Dump memory
 //Format: type=0->ascii, type=1->hex
 void print_mem(unsigned char *mem, int sz, int type = 1)
 {
     for (int i = 0; i < sz; i++) {
         if (type == 1) {
-            printf("%02x ", mem[i]);
+            printf("%02x", mem[i]);
         }
         else {
-            printf("%c ", mem[i]);
+            if (is_ascii(mem[i])) {
+                printf("%c", mem[i]);
+            }
+            else {
+                printf("\\%02x ", mem[i]);
+            }
         }
+        //if (print_space) printf(" ");
         if (i >= 16 && i % 16 == 0) {
             printf("\n");
         }
@@ -118,6 +169,33 @@ int print_number_at(unsigned char *mem, int sz)
     printf("0x%hx\n", real_offset);
 
     return 0;
+}
+
+
+int rewind_till_null(unsigned char *buf, int max)
+{
+    for (int i = 0; i < max; i++) {
+        if (*(buf - i) == '\0') return i;
+    }
+
+    return -1;
+}
+
+
+void print_shared_libs(unsigned char *buf, int max)
+{
+    char ext[] = ".dll";
+    unsigned char *s = buf;
+
+    for (int i = 0; i < MAX_SHARED_LIBS; i++) {
+        s = str_find(s, ext, max);
+        if (!s) break;
+        int dll_len = rewind_till_null(s, s - buf) - 1;
+        unsigned char *dll_name = s - dll_len;
+        s += dll_len;
+
+        printf("%s\n", dll_name);
+    }
 }
 
 
@@ -189,11 +267,38 @@ int main(int argc, char **argv)
     printf("Base of code section: "); print_number_at(buf + BASE_OF_CODE_OFF, BASE_OF_CODE_SZ);
     printf("Base of .data section: "); print_number_at(buf + BASE_OF_DATA_OFF, BASE_OF_DATA_SZ);
 
-    if (strcmp(argv[2], "-d") == 0) {
-        //Dump initialized .data section
-        size_t init_data_size = read_mem_at(buf + INITIALIZED_DATA_OFF, INITIALIZED_DATA_SZ);
-        print_mem(buf + INITIALIZED_DATA_OFF, init_data_size, 0);
+    printf("\n=Windows specific fields=\n");
+    printf("Where file is mapped in memory: "); print_number_at(buf + IMAGE_BASE_OFF, IMAGE_BASE_SZ);
+    printf("Where sections should start in memory: "); print_number_at(buf + SECTION_ALIGNMENT_OFF, SECTION_ALIGNMENT_SZ);
+    printf("Where sections should start on file: "); print_number_at(buf + FILE_ALIGNMENT_OFF, FILE_ALIGNMENT_SZ);
+
+    printf("\n==Sections\n");
+    unsigned short SECTION_HEADER_TABLE_OFF = PE_SIG_OFF + read_mem_at(buf + OPTIONAL_HEADERS_SIZE_OFF, OPTIONAL_HEADERS_SIZE_SZ) + 24; //24=COFF header size + PE_SIG_SZ
+    printf("Sections table at 0x%hx\n", SECTION_HEADER_TABLE_OFF);
+    short number_of_sections = (short)read_mem_at(buf + NUMBER_OF_SECTIONS_OFF, NUMBER_OF_SECTIONS_SZ);
+    int cur_sect_off = 0;
+    int SECTION_HEADER_NAME = 0;
+    int sect_start[16] = {};
+    int sect_sz[16] = {};
+    for (size_t i = 0; i < number_of_sections; i++) {
+        SECTION_HEADER_NAME = SECTION_HEADER_TABLE_OFF + cur_sect_off;
+        print_mem(buf + SECTION_HEADER_NAME, 8, 0);
+        sect_start[i] = read_mem_at(buf + SECTION_HEADER_RAW_LOC_OFF, SECTION_HEADER_RAW_LOC_SZ);
+        sect_sz[i] = read_mem_at(buf + SECTION_HEADER_RAW_LEN_OFF, SECTION_HEADER_RAW_LEN_SZ);
+        printf("- Starts at: "); print_number_at(buf + SECTION_HEADER_RAW_LOC_OFF, SECTION_HEADER_RAW_LOC_SZ);
+        printf("- Length: "); print_number_at(buf + SECTION_HEADER_RAW_LEN_OFF, SECTION_HEADER_RAW_LEN_SZ);
+
+        cur_sect_off += SECTION_HEADER_LEN;
     }
+
+    if (argc > 2 && strcmp(argv[2], "-d") == 0) {
+        //Dump initialized .data section
+        printf("data dump: %hx\n", sect_start[2]);
+        print_mem(buf + sect_start[2], sect_sz[2], 0);
+    }
+
+    printf("\n=Shared libraries=\n");
+    print_shared_libs(buf, fsize);
 
     //TODO: Add the rest
 
