@@ -57,19 +57,6 @@ int hex_search(unsigned char *val, int sz, unsigned char *buf, int bufsz)
 }
 
 
-unsigned char *str_find(unsigned char *buf, char *substr, int bufsz)
-{
-    int sublen = strlen(substr);
-    for (int i = 0; i < bufsz; i++) {
-        if (memcmp(buf + i, substr, sublen) == 0) {
-            return buf + i;
-        }
-    }
-
-    return NULL;
-}
-
-
 int is_ascii_symbol(unsigned char c)
 {
     static unsigned char symbols[] = {'+', '-', '*', '/', '.', '_', '[', ']', '(', ')', '~', ' '};
@@ -89,7 +76,7 @@ int is_ascii(unsigned char c)
 
 //Dump memory
 //Format: type=0->ascii, type=1->hex
-void print_mem(unsigned char *mem, int sz, int type = 1)
+void print_mem(unsigned char *mem, int sz, int type)
 {
     for (int i = 0; i < sz; i++) {
         if (type == 1) {
@@ -129,7 +116,7 @@ void mem_reverse(unsigned char *mem, int sz)
 }
 
 
-bool is_big_endian(void)
+int is_big_endian(void)
 {
     union {
         unsigned int i;
@@ -182,19 +169,35 @@ int rewind_till_null(unsigned char *buf, int max)
 }
 
 
+unsigned char *str_find(unsigned char *buf, char *substr, int bufsz)
+{
+    int sublen = strlen(substr);
+    for (int i = 0; i < bufsz - sublen; i++) {
+        if (memcmp(buf + i, substr, sublen) == 0) {
+            return buf + i;
+        }
+    }
+    return NULL;
+}
+
+
 void print_shared_libs(unsigned char *buf, int max)
 {
     char ext[] = ".dll";
     unsigned char *s = buf;
+    unsigned char *dll_name = buf;
 
     for (int i = 0; i < MAX_SHARED_LIBS; i++) {
-        s = str_find(s, ext, max);
+        if (s > buf + max) break;
+        s = str_find(s, ext, max - (s - buf)); //s went too far here
         if (!s) break;
-        int dll_len = rewind_till_null(s, s - buf) - 1;
-        unsigned char *dll_name = s - dll_len;
+
+        int dll_len = rewind_till_null(s, s - dll_name + dll_len) - 1; //rewind till null but not before previous dllname
+        dll_name = s - dll_len;
         s += dll_len;
 
         printf("%s\n", dll_name);
+
     }
 }
 
@@ -278,11 +281,13 @@ int main(int argc, char **argv)
     short number_of_sections = (short)read_mem_at(buf + NUMBER_OF_SECTIONS_OFF, NUMBER_OF_SECTIONS_SZ);
     int cur_sect_off = 0;
     int SECTION_HEADER_NAME = 0;
+    unsigned char *sect_name[16] = {};
     int sect_start[16] = {};
     int sect_sz[16] = {};
     for (size_t i = 0; i < number_of_sections; i++) {
         SECTION_HEADER_NAME = SECTION_HEADER_TABLE_OFF + cur_sect_off;
         print_mem(buf + SECTION_HEADER_NAME, 8, 0);
+        sect_name[i] = buf + SECTION_HEADER_NAME;
         sect_start[i] = read_mem_at(buf + SECTION_HEADER_RAW_LOC_OFF, SECTION_HEADER_RAW_LOC_SZ);
         sect_sz[i] = read_mem_at(buf + SECTION_HEADER_RAW_LEN_OFF, SECTION_HEADER_RAW_LEN_SZ);
         printf("- Starts at: "); print_number_at(buf + SECTION_HEADER_RAW_LOC_OFF, SECTION_HEADER_RAW_LOC_SZ);
@@ -293,13 +298,18 @@ int main(int argc, char **argv)
 
     if (argc > 2 && strcmp(argv[2], "-d") == 0) {
         //Dump initialized .data section
-        printf("data dump: %hx\n", sect_start[2]);
-        print_mem(buf + sect_start[2], sect_sz[2], 0);
+        for (int i = 0; i < number_of_sections; i++) {
+            if (strstr((const char*)sect_name[i], "data")) {
+                printf("\n=Dumping section: %s=\n", sect_name[i]);
+                print_mem(buf + sect_start[2], sect_sz[2], 0);
+            }
+        }
+
     }
 
     printf("\n=Shared libraries=\n");
-    print_shared_libs(buf, fsize);
-
+    print_shared_libs(buf + sect_start[1], fsize - sect_start[1]);
+    
     //TODO: Add the rest
 
     free(buf);
