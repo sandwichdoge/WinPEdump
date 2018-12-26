@@ -173,10 +173,14 @@ void print_shared_libs(unsigned char *buf, int max)
 
     for (int i = 0; i < MAX_SHARED_LIBS; i++) {
         if (s > buf + max) break;
-        s = str_find(s, ext, max - (s - buf)); //s went too far here
+        s = str_find(s, ext, max - (s - buf));
         if (!s) break;
 
         int dll_len = rewind_till_null(s, s - dll_name + dll_len) - 1; //rewind till null but not before previous dllname
+        if (dll_len == -2) {
+            s += strlen(ext);
+            continue;
+        }
         dll_name = s - dll_len;
         s += dll_len;
 
@@ -285,6 +289,7 @@ int main(int argc, char **argv)
     
     //TODO: Add the rest
 
+    printf("Finished.\n");
     free(buf);
     return 0;
 
